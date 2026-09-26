@@ -1,0 +1,15 @@
+[project]
+name = "sec-scan"
+version = "0.1.0"
+description = "A from-scratch CLI security scanner"
+requires-python = ">=3.8"
+
+[project.scripts]
+sec-scan = "sec_scan.scanner:main"
+
+[tool.setuptools]
+packages = ["sec_scan", "sec_scan.checks"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
