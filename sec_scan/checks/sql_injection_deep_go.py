@@ -1,11 +1,9 @@
 """
 sql_injection_deep_go.py - Go deep SQL injection check.
-Go has no native string interpolation (no equivalent to f-strings/
-template literals), so only concatenation is tracked here. Building
-a query with fmt.Sprintf is a real and common pattern in Go that
-this version does NOT catch - a known, documented gap, since
-Sprintf's danger comes from its format string content, which needs
-different handling than a binary concatenation expression.
+No native string interpolation, so concatenation and fmt.Sprintf(...)
+calls are the two unsafe-construction patterns tracked here. %s is
+deliberately NOT a "safe placeholder" here - it's Sprintf's format
+specifier, not a real SQL placeholder.
 """
 
 import re
@@ -18,7 +16,7 @@ EXTENSIONS = {".go"}
 
 _PARSER = Parser(Language(ts_go.language()))
 
-SAFE_PLACEHOLDER = re.compile(r'\?|%s|@\w+|:\w+')
+SAFE_PLACEHOLDER = re.compile(r'\?|@\w+|:\w+')
 
 
 def _get_call_name(call_node):
@@ -40,18 +38,39 @@ def _get_call_args(call_node):
     return [c for c in args.children if c.type not in ("(", ")", ",")]
 
 
+def _get_function_name(func_node):
+    name = func_node.child_by_field_name("name")
+    return name.text.decode() if name else None
+
+
+def _get_function_params(func_node):
+    params_node = func_node.child_by_field_name("parameters")
+    if params_node is None:
+        return []
+    out = []
+    for c in params_node.children:
+        if c.type == "parameter_declaration":
+            n = c.child_by_field_name("name")
+            if n:
+                out.append(n.text.decode())
+    return out
+
+
 CONFIG = LanguageConfig(
     scope_types={"function_declaration", "method_declaration"},
     assign_types={"short_var_declaration", "assignment_statement"},
     identifier_types={"identifier"},
     binary_types={"binary_expression"},
     concat_ops={"+"},
-    string_types=set(),        # no native interpolation in Go
+    string_types=set(),
     interpolation_types=set(),
     call_types={"call_expression"},
     sink_names={"query", "exec", "queryrow"},
     get_call_name=_get_call_name,
     get_call_args=_get_call_args,
+    format_call_names={"sprintf"},
+    get_function_name=_get_function_name,
+    get_function_params=_get_function_params,
 )
 
 

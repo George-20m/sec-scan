@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
 """
-scanner.py — entry point for the security scanner CLI.
-
-Usage:
-    python3 scanner.py <path-to-scan>
-
-How it works:
-    1. Walk every file under <path-to-scan>.
-    2. For each file, look at its extension to guess the language.
-    3. Ask every check module in checks/ whether it applies to that
-       language, and if so, run it against the file's content.
-    4. Collect all findings and print a report at the end.
-
-Adding a new check later = adding one new file to checks/ that
-follows the same shape as checks/sql_injection.py. Nothing in this
-file needs to change.
+scanner.py - entry point for the security scanner CLI.
 """
 
 import argparse
@@ -26,10 +12,6 @@ from colorama import Fore, Style
 
 from .checks.registry import load_checks
 
-# init(autoreset=True) means we don't have to manually reset color
-# after every colored print — colorama resets it for us automatically.
-# On Windows, this is also what makes ANSI colors render at all in
-# terminals that don't support them natively (older cmd.exe).
 colorama.init(autoreset=True)
 
 SKIP_DIRS = {".git", "node_modules", "venv", ".venv", "__pycache__",
@@ -47,6 +29,25 @@ def collect_files(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for name in filenames:
             yield os.path.join(dirpath, name)
+
+
+def dedup_findings(findings):
+    """If a deep check (check_id ending in '-DEEP') found something at
+    the exact same file+line as a non-deep check, drop the non-deep
+    one - it's the same bug, and the deep finding is strictly more
+    informative, so keeping both is just noise, not two different
+    bugs."""
+    deep_locations = {
+        (f["file"], f["line"])
+        for f in findings
+        if f["check_id"].endswith("-DEEP")
+    }
+    result = []
+    for f in findings:
+        if not f["check_id"].endswith("-DEEP") and (f["file"], f["line"]) in deep_locations:
+            continue
+        result.append(f)
+    return result
 
 
 def main():
@@ -81,6 +82,7 @@ def main():
                 findings = check.run(file_path, content)
                 all_findings.extend(findings)
 
+    all_findings = dedup_findings(all_findings)
     print_report(all_findings, len(files), len(checks))
 
 

@@ -1,7 +1,11 @@
 """
 sql_injection_deep_java.py - Java deep SQL injection check.
-Java has no native string interpolation, so only concatenation is
-tracked as an unsafe-construction pattern here.
+Java has no native string interpolation, so concatenation and
+String.format(...) calls are the two unsafe-construction patterns
+tracked here. Note: %s is deliberately NOT treated as a "safe
+placeholder" in this file, because in Java %s is always
+String.format's format specifier, never a real SQL parameter
+placeholder (JDBC uses ?).
 """
 
 import re
@@ -14,7 +18,7 @@ EXTENSIONS = {".java"}
 
 _PARSER = Parser(Language(ts_java.language()))
 
-SAFE_PLACEHOLDER = re.compile(r'\?|%s|@\w+|:\w+')
+SAFE_PLACEHOLDER = re.compile(r'\?|@\w+|:\w+')
 
 
 def _get_call_name(call_node):
@@ -31,18 +35,39 @@ def _get_call_args(call_node):
     return [c for c in args.children if c.type not in ("(", ")", ",")]
 
 
+def _get_function_name(func_node):
+    name = func_node.child_by_field_name("name")
+    return name.text.decode() if name else None
+
+
+def _get_function_params(func_node):
+    params_node = func_node.child_by_field_name("parameters")
+    if params_node is None:
+        return []
+    out = []
+    for c in params_node.children:
+        if c.type == "formal_parameter":
+            n = c.child_by_field_name("name")
+            if n:
+                out.append(n.text.decode())
+    return out
+
+
 CONFIG = LanguageConfig(
     scope_types={"method_declaration", "constructor_declaration"},
     assign_types={"variable_declarator", "assignment_expression"},
     identifier_types={"identifier"},
     binary_types={"binary_expression"},
     concat_ops={"+"},
-    string_types=set(),        # no native interpolation in Java
+    string_types=set(),
     interpolation_types=set(),
     call_types={"method_invocation"},
     sink_names={"executequery", "executeupdate"},
     get_call_name=_get_call_name,
     get_call_args=_get_call_args,
+    format_call_names={"format"},
+    get_function_name=_get_function_name,
+    get_function_params=_get_function_params,
 )
 
 
