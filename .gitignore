@@ -1,0 +1,20 @@
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Build artifacts from `python -m build`
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Editor/IDE clutter
+.vscode/
+.idea/
+
+# OS clutter
+.DS_Store
