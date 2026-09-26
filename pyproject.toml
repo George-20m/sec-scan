@@ -3,6 +3,10 @@ name = "sec-scan"
 version = "0.1.0"
 description = "A from-scratch CLI security scanner"
 requires-python = ">=3.8"
+dependencies = [
+    "tree-sitter>=0.21",
+    "tree-sitter-python>=0.21",
+]
 
 [project.scripts]
 sec-scan = "sec_scan.scanner:main"
