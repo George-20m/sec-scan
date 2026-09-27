@@ -8,7 +8,6 @@ String.format's format specifier, never a real SQL parameter
 placeholder (JDBC uses ?).
 """
 
-import re
 import tree_sitter_java as ts_java
 from tree_sitter import Language, Parser
 
@@ -17,8 +16,6 @@ from .taint_common import LanguageConfig, run_taint_check
 EXTENSIONS = {".java"}
 
 _PARSER = Parser(Language(ts_java.language()))
-
-SAFE_PLACEHOLDER = re.compile(r'\?|@\w+|:\w+')
 
 
 def _get_call_name(call_node):
@@ -73,5 +70,4 @@ CONFIG = LanguageConfig(
 
 def run(file_path, content):
     source = content.encode()
-    findings = run_taint_check(_PARSER, source, file_path, CONFIG)
-    return [f for f in findings if not SAFE_PLACEHOLDER.search(f["snippet"])]
+    return run_taint_check(_PARSER, source, file_path, CONFIG)

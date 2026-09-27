@@ -2,7 +2,6 @@
 sql_injection_deep_php.py - PHP deep SQL injection check.
 """
 
-import re
 import tree_sitter_php as ts_php
 from tree_sitter import Language, Parser
 
@@ -11,8 +10,6 @@ from .taint_common import LanguageConfig, run_taint_check
 EXTENSIONS = {".php"}
 
 _PARSER = Parser(Language(ts_php.language_php()))
-
-SAFE_PLACEHOLDER = re.compile(r'\?|%s|@\w+|:\w+')
 
 
 def _get_call_name(call_node):
@@ -70,5 +67,4 @@ CONFIG = LanguageConfig(
 
 def run(file_path, content):
     source = content.encode()
-    findings = run_taint_check(_PARSER, source, file_path, CONFIG)
-    return [f for f in findings if not SAFE_PLACEHOLDER.search(f["snippet"])]
+    return run_taint_check(_PARSER, source, file_path, CONFIG)

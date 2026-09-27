@@ -2,7 +2,6 @@
 sql_injection_deep_js.py - JS/TS deep SQL injection check.
 """
 
-import re
 import tree_sitter_javascript as ts_js
 import tree_sitter_typescript as ts_ts
 from tree_sitter import Language, Parser
@@ -13,8 +12,6 @@ EXTENSIONS = {".js", ".ts"}
 
 _JS_PARSER = Parser(Language(ts_js.language()))
 _TS_PARSER = Parser(Language(ts_ts.language_typescript()))
-
-SAFE_PLACEHOLDER = re.compile(r'\?|%s|@\w+|:\w+')
 
 
 def _get_call_name(call_node):
@@ -68,5 +65,4 @@ CONFIG = LanguageConfig(
 def run(file_path, content):
     source = content.encode()
     parser = _TS_PARSER if file_path.endswith(".ts") else _JS_PARSER
-    findings = run_taint_check(parser, source, file_path, CONFIG)
-    return [f for f in findings if not SAFE_PLACEHOLDER.search(f["snippet"])]
+    return run_taint_check(parser, source, file_path, CONFIG)

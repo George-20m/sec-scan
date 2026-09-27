@@ -32,22 +32,35 @@ def collect_files(root):
 
 
 def dedup_findings(findings):
-    """If a deep check (check_id ending in '-DEEP') found something at
-    the exact same file+line as a non-deep check, drop the non-deep
-    one - it's the same bug, and the deep finding is strictly more
-    informative, so keeping both is just noise, not two different
-    bugs."""
-    deep_locations = {
-        (f["file"], f["line"])
-        for f in findings
-        if f["check_id"].endswith("-DEEP")
-    }
-    result = []
+    """Collapse findings that report the SAME underlying bug down to
+    one. Two findings are considered the same bug only if their
+    check_id - with any trailing '-DEEP' stripped - matches AND they
+    point at the same file+line. This lets a deep check dedupe
+    against its own line-based counterpart (SQL-INJECTION-DEEP vs
+    SQL-INJECTION), and also lets two deep findings at the same
+    location collapse into one (e.g. a helper function analyzed
+    directly and again via cross-function taint propagation).
+    It deliberately does NOT collapse findings from unrelated check
+    families that happen to land on the same line (e.g. a future
+    XSS check and a SQL-INJECTION check) - those are different bugs
+    and both must be reported.
+    Within a matching group, a deep finding is always kept over a
+    non-deep one, since it's strictly more informative."""
+    def family(check_id):
+        return check_id[:-5] if check_id.endswith("-DEEP") else check_id
+
+    by_key = {}
+    order = []
     for f in findings:
-        if not f["check_id"].endswith("-DEEP") and (f["file"], f["line"]) in deep_locations:
+        key = (family(f["check_id"]), f["file"], f["line"])
+        if key not in by_key:
+            by_key[key] = f
+            order.append(key)
             continue
-        result.append(f)
-    return result
+        existing = by_key[key]
+        if f["check_id"].endswith("-DEEP") and not existing["check_id"].endswith("-DEEP"):
+            by_key[key] = f
+    return [by_key[key] for key in order]
 
 
 def main():
