@@ -53,6 +53,13 @@ def _get_function_params(func_node):
     return out
 
 
+def _is_unqualified_call(call_node):
+    # selector_expression = obj.Method() (qualified);
+    # identifier = Method() (bare, matches a local function).
+    fn = call_node.child_by_field_name("function")
+    return fn is not None and fn.type == "identifier"
+
+
 CONFIG = LanguageConfig(
     scope_types={"function_declaration", "method_declaration"},
     assign_types={"short_var_declaration", "assignment_statement"},
@@ -68,6 +75,7 @@ CONFIG = LanguageConfig(
     format_call_names={"sprintf"},
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
+    is_unqualified_call=_is_unqualified_call,
 )
 
 

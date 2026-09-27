@@ -38,6 +38,14 @@ def _get_function_params(func_node):
     return [c.text.decode() for c in params_node.children if c.type == "identifier"]
 
 
+def _is_unqualified_call(call_node):
+    # "call" nodes have a "receiver" field when qualified
+    # (obj.method); absent when bare (method).
+    if call_node.type != "call":
+        return False
+    return call_node.child_by_field_name("receiver") is None
+
+
 CONFIG = LanguageConfig(
     scope_types={"method"},
     assign_types={"assignment"},
@@ -52,6 +60,7 @@ CONFIG = LanguageConfig(
     get_call_args=_get_call_args,
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
+    is_unqualified_call=_is_unqualified_call,
 )
 
 

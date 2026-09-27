@@ -50,6 +50,14 @@ def _get_function_params(func_node):
     return out
 
 
+def _is_unqualified_call(call_node):
+    # method_invocation has an "object" field when qualified
+    # (obj.method()); absent when bare (method()).
+    if call_node.type != "method_invocation":
+        return False
+    return call_node.child_by_field_name("object") is None
+
+
 CONFIG = LanguageConfig(
     scope_types={"method_declaration", "constructor_declaration"},
     assign_types={"variable_declarator", "assignment_expression"},
@@ -65,6 +73,7 @@ CONFIG = LanguageConfig(
     format_call_names={"format"},
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
+    is_unqualified_call=_is_unqualified_call,
 )
 
 

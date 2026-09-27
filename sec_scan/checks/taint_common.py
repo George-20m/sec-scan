@@ -2,7 +2,7 @@
 taint_common.py - shared taint-tracking engine used by every
 language-specific deep SQL injection check (sql_injection_deep_*.py).
 
-v2 additions over the original:
+v2 additions:
   - format_call_names: recognizes format-string calls (String.format,
     fmt.Sprintf) as an unsafe-construction pattern, not just
     concatenation/interpolation.
@@ -18,6 +18,25 @@ v2 additions over the original:
     that return value is not caught. Only "pass taint in, callee
     executes it directly" is covered, not "callee returns taint,
     caller executes it."
+
+v3 additions:
+  - is_unqualified_call: gates cross-function propagation to calls
+    that are genuinely bare (no receiver/object), so a call like
+    obj.query(x) can no longer be mistaken for a same-named local
+    function query(x) just because get_call_name() returns "query"
+    for both. If a language config doesn't set this, propagation
+    behaves as before (no gating).
+  - Simple identifier-to-identifier alias tracking: if `a = b` and
+    `b` is already a tainted plain identifier, `a` becomes tainted
+    too. This is intentionally narrow - it does not cover object
+    properties, array/index access, or anything routed through a
+    function call or return value.
+  - format_min_args: minimum argument count for a format-style call
+    to count as unsafe. Defaults to 2 (format string + >=1
+    substitution), matching the original String.format/Sprintf
+    behavior where the format string is itself a positional
+    argument. Languages where the format string is the receiver
+    instead of an argument (Python's "...".format(x)) set this to 1.
 """
 
 from dataclasses import dataclass, field
@@ -37,8 +56,10 @@ class LanguageConfig:
     get_call_name: callable
     get_call_args: callable
     format_call_names: set = field(default_factory=set)
+    format_min_args: int = 2
     get_function_name: callable = None
     get_function_params: callable = None
+    is_unqualified_call: callable = None
 
 
 def node_text(node, source):
@@ -88,7 +109,7 @@ def is_format_call(node, cfg):
     if not name or name.lower() not in cfg.format_call_names:
         return False
     args = cfg.get_call_args(node)
-    return len(args) > 1  # format string + at least one substitution
+    return len(args) >= cfg.format_min_args
 
 
 def expr_is_unsafe(node, cfg):
@@ -177,6 +198,10 @@ def scan_scope(func_node, source, file_path, findings, cfg,
                 name = node_text(left, source).decode(errors="ignore")
                 if expr_is_unsafe(right, cfg):
                     tainted.add(name)
+                elif (right.type in cfg.identifier_types
+                        and node_text(right, source).decode(errors="ignore") in tainted):
+                    # simple alias: a = b, where b is already tainted
+                    tainted.add(name)
                 else:
                     tainted.discard(name)
 
@@ -187,10 +212,13 @@ def scan_scope(func_node, source, file_path, findings, cfg,
             # tainted (or directly unsafe) value into a function
             # defined elsewhere in this same file, analyze that
             # function's body with the matching parameter seeded as
-            # tainted too.
+            # tainted too. Gated by is_unqualified_call so a
+            # receiver-qualified call (obj.query(x)) can't be
+            # mistaken for a same-named local function.
             if local_functions:
                 name = cfg.get_call_name(node)
-                if name and name in local_functions and name not in visiting:
+                is_bare = cfg.is_unqualified_call is None or cfg.is_unqualified_call(node)
+                if name and is_bare and name in local_functions and name not in visiting:
                     params, body = local_functions[name]
                     call_args = cfg.get_call_args(node)
                     seed = set()

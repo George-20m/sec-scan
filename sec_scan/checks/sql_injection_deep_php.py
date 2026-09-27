@@ -1,5 +1,15 @@
 """
 sql_injection_deep_php.py - PHP deep SQL injection check.
+
+Note: call_types here is member_call_expression only (e.g.
+$pdo->query(...)), which is always receiver-qualified. That means
+cross-function local-helper tracking has no unambiguous "bare call"
+path to use for this language as currently scoped, so
+is_unqualified_call always returns False here, disabling that
+propagation for PHP rather than leaving it matching on ambiguous
+receiver-qualified calls. Supporting bare function_call_expression
+calls would be a separate addition (add it to call_types, teach
+_get_call_name/_get_call_args to handle it).
 """
 
 import tree_sitter_php as ts_php
@@ -48,6 +58,10 @@ def _get_function_params(func_node):
     return out
 
 
+def _is_unqualified_call(call_node):
+    return False
+
+
 CONFIG = LanguageConfig(
     scope_types={"function_definition", "method_declaration"},
     assign_types={"assignment_expression"},
@@ -62,6 +76,7 @@ CONFIG = LanguageConfig(
     get_call_args=_get_call_args,
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
+    is_unqualified_call=_is_unqualified_call,
 )
 
 
