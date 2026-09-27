@@ -3,6 +3,11 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.1]
+### Fixed
+- Added working changelog, repository, and PyPI release-history links
+  to the package metadata and project README.
+
 ## [0.3.0]
 ### Added
 - Cross-function taint tracking (single file, one level deep): if a

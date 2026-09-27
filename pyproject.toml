@@ -1,6 +1,6 @@
 [project]
 name = "sec-scan"
-version = "0.3.0"
+version = "0.3.1"
 description = "A from-scratch CLI security scanner"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -16,6 +16,11 @@ dependencies = [
     "tree-sitter-go>=0.21",
     "colorama>=0.4",
 ]
+
+[project.urls]
+Repository = "https://github.com/George-20m/sec-scan"
+Changelog = "https://github.com/George-20m/sec-scan/blob/prod/CHANGELOG.md"
+"Release history" = "https://pypi.org/project/sec-scan/#history"
 
 [project.scripts]
 sec-scan = "sec_scan.scanner:main"
