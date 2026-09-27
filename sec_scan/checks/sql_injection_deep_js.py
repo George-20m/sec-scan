@@ -1,7 +1,5 @@
 """
 sql_injection_deep_js.py - JS/TS deep SQL injection check.
-Uses taint_common's shared engine; this file only supplies the
-JS/TS-specific grammar knowledge.
 """
 
 import re
@@ -38,6 +36,18 @@ def _get_call_args(call_node):
     return [c for c in args.children if c.type not in ("(", ")", ",")]
 
 
+def _get_function_name(func_node):
+    name = func_node.child_by_field_name("name")
+    return name.text.decode() if name else None
+
+
+def _get_function_params(func_node):
+    params_node = func_node.child_by_field_name("parameters")
+    if params_node is None:
+        return []
+    return [c.text.decode() for c in params_node.children if c.type == "identifier"]
+
+
 CONFIG = LanguageConfig(
     scope_types={"function_declaration", "method_definition", "function_expression", "arrow_function"},
     assign_types={"variable_declarator", "assignment_expression"},
@@ -50,6 +60,8 @@ CONFIG = LanguageConfig(
     sink_names={"query", "execute", "raw"},
     get_call_name=_get_call_name,
     get_call_args=_get_call_args,
+    get_function_name=_get_function_name,
+    get_function_params=_get_function_params,
 )
 
 

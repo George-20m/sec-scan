@@ -1,12 +1,8 @@
 """
 sql_injection_deep_csharp.py - C# deep SQL injection check.
-
-Special case worth noting: in ADO.NET, the dangerous moment is often
-`new SqlCommand(query)` (the constructor), not `cmd.ExecuteReader()`
-(which usually takes no arguments at all - the query was already
-handed over earlier). So object_creation_expression for known
-*Command classes is treated as a sink here, alongside the usual
-Execute* method calls.
+Treats `new SqlCommand(query)` (and similar *Command constructors)
+as a sink in its own right, since the dangerous moment is often the
+constructor call, not the later Execute*() call.
 """
 
 import re
@@ -51,9 +47,25 @@ def _get_call_args(call_node):
     return out
 
 
+def _get_function_name(func_node):
+    name = func_node.child_by_field_name("name")
+    return name.text.decode() if name else None
+
+
+def _get_function_params(func_node):
+    params_node = func_node.child_by_field_name("parameters")
+    if params_node is None:
+        return []
+    out = []
+    for c in params_node.children:
+        if c.type == "parameter":
+            n = c.child_by_field_name("name")
+            if n:
+                out.append(n.text.decode())
+    return out
+
+
 class _SinkNameSet(set):
-    # SqlCommand, OleDbCommand, NpgsqlCommand, MySqlCommand, etc. all
-    # end in "Command" - match by suffix instead of an exhaustive list.
     def __contains__(self, item):
         if super().__contains__(item):
             return True
@@ -72,6 +84,8 @@ CONFIG = LanguageConfig(
     sink_names=_SinkNameSet({"executereader", "executenonquery", "executescalar"}),
     get_call_name=_get_call_name,
     get_call_args=_get_call_args,
+    get_function_name=_get_function_name,
+    get_function_params=_get_function_params,
 )
 
 

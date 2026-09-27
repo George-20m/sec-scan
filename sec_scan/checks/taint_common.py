@@ -2,29 +2,43 @@
 taint_common.py - shared taint-tracking engine used by every
 language-specific deep SQL injection check (sql_injection_deep_*.py).
 
-Each language file only supplies a LanguageConfig describing how ITS
-grammar spells out "assignment", "string concatenation", "string
-interpolation", and "a call to a sink function" - the actual
-algorithm (track tainted variables per function scope, follow them
-to a sink) lives here once, instead of being copy-pasted per file.
+v2 additions over the original:
+  - format_call_names: recognizes format-string calls (String.format,
+    fmt.Sprintf) as an unsafe-construction pattern, not just
+    concatenation/interpolation.
+  - get_function_name / get_function_params: enables single-file,
+    one-level-deep cross-function taint tracking. If a tainted
+    variable is passed into a function defined elsewhere in the SAME
+    file, that function's matching parameter is treated as tainted
+    for that call, and its body is analyzed too. This does NOT
+    follow taint across files, through recursion cycles, or through
+    callbacks/higher-order functions - those remain out of scope.
+    It also does NOT track a helper function's RETURN value - if a
+    helper builds and returns a tainted string, the caller executing
+    that return value is not caught. Only "pass taint in, callee
+    executes it directly" is covered, not "callee returns taint,
+    caller executes it."
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
 class LanguageConfig:
-    scope_types: set          # node types that start a new taint scope (functions/methods)
-    assign_types: set         # node types representing "name = value"
-    identifier_types: set     # node types that count as a plain variable name
-    binary_types: set         # node types representing a binary operation
-    concat_ops: set           # token types, within a binary node, that mean concatenation
-    string_types: set         # node types representing a string literal
-    interpolation_types: set  # child node types inside a string that mean "interpolated"
-    call_types: set           # node types representing a call (or call-like sink, e.g. `new SqlCommand(...)`)
-    sink_names: set           # lowercase function/method names that execute SQL
-    get_call_name: callable   # (call_node) -> str or None
-    get_call_args: callable   # (call_node) -> list of argument expression nodes
+    scope_types: set
+    assign_types: set
+    identifier_types: set
+    binary_types: set
+    concat_ops: set
+    string_types: set
+    interpolation_types: set
+    call_types: set
+    sink_names: set
+    get_call_name: callable
+    get_call_args: callable
+    format_call_names: set = field(default_factory=set)
+    get_function_name: callable = None
+    get_function_params: callable = None
 
 
 def node_text(node, source):
@@ -32,9 +46,6 @@ def node_text(node, source):
 
 
 def unwrap_single(node):
-    # Some grammars wrap a single value in a list node (e.g. Go's
-    # `expression_list` for `x := y`). If it only holds one child,
-    # unwrap to that child so the rest of the logic sees the real value.
     if node is not None and node.type == "expression_list" and node.child_count == 1:
         return node.children[0]
     return node
@@ -46,9 +57,6 @@ def get_assign_parts(node):
     if left is not None and right is not None:
         return unwrap_single(left), unwrap_single(right)
 
-    # Positional fallback for grammars that don't expose named fields
-    # for this node (e.g. C#'s variable_declarator): find the '=' or
-    # ':=' token and take what's directly before/after it.
     children = node.children
     for i, c in enumerate(children):
         if c.type in ("=", ":="):
@@ -73,6 +81,16 @@ def is_interpolated_string(node, cfg):
     return False
 
 
+def is_format_call(node, cfg):
+    if not cfg.format_call_names or node.type not in cfg.call_types:
+        return False
+    name = cfg.get_call_name(node)
+    if not name or name.lower() not in cfg.format_call_names:
+        return False
+    args = cfg.get_call_args(node)
+    return len(args) > 1  # format string + at least one substitution
+
+
 def expr_is_unsafe(node, cfg):
     if node is None:
         return False
@@ -80,6 +98,8 @@ def expr_is_unsafe(node, cfg):
         return is_interpolated_string(node, cfg)
     if node.type in cfg.binary_types:
         return contains_concat(node, cfg)
+    if node.type in cfg.call_types:
+        return is_format_call(node, cfg)
     return False
 
 
@@ -118,12 +138,37 @@ def check_call(call_node, tainted, source, file_path, findings, cfg):
             findings.append(build_finding(file_path, call_node, source, arg_src, False))
 
 
-def scan_scope(func_node, source, file_path, findings, cfg):
-    tainted = set()
+def collect_local_functions(root_node, cfg):
+    """Maps function name -> (param_names, body_node) for every
+    scope in the file, so calls to them can be followed one level
+    deep. Returns {} if the language config doesn't support this
+    (get_function_name is None)."""
+    registry = {}
+    if cfg.get_function_name is None:
+        return registry
+
+    def walk(node):
+        if node.type in cfg.scope_types:
+            name = cfg.get_function_name(node)
+            if name:
+                params = cfg.get_function_params(node) if cfg.get_function_params else []
+                registry[name] = (params, node)
+        for c in node.children:
+            walk(c)
+
+    walk(root_node)
+    return registry
+
+
+def scan_scope(func_node, source, file_path, findings, cfg,
+               local_functions=None, seed_tainted=None, visiting=None):
+    tainted = set(seed_tainted) if seed_tainted else set()
+    if visiting is None:
+        visiting = set()
 
     def walk(node):
         if node.type in cfg.scope_types and node is not func_node:
-            scan_scope(node, source, file_path, findings, cfg)
+            scan_scope(node, source, file_path, findings, cfg, local_functions, None, visiting)
             return
 
         if node.type in cfg.assign_types:
@@ -138,6 +183,30 @@ def scan_scope(func_node, source, file_path, findings, cfg):
         if node.type in cfg.call_types:
             check_call(node, tainted, source, file_path, findings, cfg)
 
+            # Cross-function propagation: if this call passes a
+            # tainted (or directly unsafe) value into a function
+            # defined elsewhere in this same file, analyze that
+            # function's body with the matching parameter seeded as
+            # tainted too.
+            if local_functions:
+                name = cfg.get_call_name(node)
+                if name and name in local_functions and name not in visiting:
+                    params, body = local_functions[name]
+                    call_args = cfg.get_call_args(node)
+                    seed = set()
+                    for i, arg in enumerate(call_args):
+                        if i >= len(params):
+                            break
+                        arg_src = node_text(arg, source).decode(errors="ignore")
+                        is_tainted_arg = (arg.type in cfg.identifier_types and arg_src in tainted)
+                        if is_tainted_arg or expr_is_unsafe(arg, cfg):
+                            seed.add(params[i])
+                    if seed:
+                        visiting.add(name)
+                        scan_scope(body, source, file_path, findings, cfg,
+                                   local_functions, seed, visiting)
+                        visiting.discard(name)
+
         for child in node.children:
             walk(child)
 
@@ -147,5 +216,6 @@ def scan_scope(func_node, source, file_path, findings, cfg):
 def run_taint_check(parser, source, file_path, cfg):
     tree = parser.parse(source)
     findings = []
-    scan_scope(tree.root_node, source, file_path, findings, cfg)
+    local_functions = collect_local_functions(tree.root_node, cfg)
+    scan_scope(tree.root_node, source, file_path, findings, cfg, local_functions)
     return findings
