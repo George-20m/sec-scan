@@ -3,6 +3,26 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0]
+### Fixed
+- Dedup, remove unsound placeholder filter, port Python to parity.
+
+- scanner.py: dedup by (vuln family, file, line) instead of (file, line).
+- remove SAFE_PLACEHOLDER regex from all deep SQLi checks and the
+  line-based check; a placeholder token existing in a line never
+  proved the rest of the line was safe.
+- port Python's deep check onto taint_common.py (shared engine),
+  giving it cross-function tracking and .format() detection like
+  the other 7 languages.
+- add is_unqualified_call to prevent cross-function tracking from
+  matching a receiver-qualified call (obj.query()) against a
+  same-named local function.
+- add simple identifier alias tracking (a = b, where b is tainted).
+- add tools/fetch_node_types.py and tools/verify_node_types.py to
+  check language-config assumptions against each grammar's real
+  node-types.json, and tools/run_functional_checks.py as a
+  real-parser regression suite (33 cases, all 8 languages).
+
 ## [0.3.1]
 ### Fixed
 - Added working changelog, repository, and PyPI release-history links
