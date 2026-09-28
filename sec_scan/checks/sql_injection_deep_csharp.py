@@ -5,7 +5,6 @@ as a sink in its own right, since the dangerous moment is often the
 constructor call, not the later Execute*() call.
 """
 
-import re
 import tree_sitter_c_sharp as ts_cs
 from tree_sitter import Language, Parser
 
@@ -14,8 +13,6 @@ from .taint_common import LanguageConfig, run_taint_check
 EXTENSIONS = {".cs"}
 
 _PARSER = Parser(Language(ts_cs.language()))
-
-SAFE_PLACEHOLDER = re.compile(r'\?|%s|@\w+|:\w+')
 
 COMMAND_CLASS_SUFFIX = "command"
 
@@ -65,6 +62,17 @@ def _get_function_params(func_node):
     return out
 
 
+def _is_unqualified_call(call_node):
+    # object_creation_expression (constructors) never match a local
+    # method by name, so treat as qualified. invocation_expression
+    # is unqualified only when its function is a bare identifier,
+    # not a member_access_expression (obj.Method()).
+    if call_node.type != "invocation_expression":
+        return False
+    fn = call_node.child_by_field_name("function")
+    return fn is not None and fn.type == "identifier"
+
+
 class _SinkNameSet(set):
     def __contains__(self, item):
         if super().__contains__(item):
@@ -86,10 +94,10 @@ CONFIG = LanguageConfig(
     get_call_args=_get_call_args,
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
+    is_unqualified_call=_is_unqualified_call,
 )
 
 
 def run(file_path, content):
     source = content.encode()
-    findings = run_taint_check(_PARSER, source, file_path, CONFIG)
-    return [f for f in findings if not SAFE_PLACEHOLDER.search(f["snippet"])]
+    return run_taint_check(_PARSER, source, file_path, CONFIG)

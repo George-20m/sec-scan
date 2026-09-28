@@ -6,7 +6,6 @@ deliberately NOT a "safe placeholder" here - it's Sprintf's format
 specifier, not a real SQL placeholder.
 """
 
-import re
 import tree_sitter_go as ts_go
 from tree_sitter import Language, Parser
 
@@ -15,8 +14,6 @@ from .taint_common import LanguageConfig, run_taint_check
 EXTENSIONS = {".go"}
 
 _PARSER = Parser(Language(ts_go.language()))
-
-SAFE_PLACEHOLDER = re.compile(r'\?|@\w+|:\w+')
 
 
 def _get_call_name(call_node):
@@ -56,6 +53,13 @@ def _get_function_params(func_node):
     return out
 
 
+def _is_unqualified_call(call_node):
+    # selector_expression = obj.Method() (qualified);
+    # identifier = Method() (bare, matches a local function).
+    fn = call_node.child_by_field_name("function")
+    return fn is not None and fn.type == "identifier"
+
+
 CONFIG = LanguageConfig(
     scope_types={"function_declaration", "method_declaration"},
     assign_types={"short_var_declaration", "assignment_statement"},
@@ -71,10 +75,10 @@ CONFIG = LanguageConfig(
     format_call_names={"sprintf"},
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
+    is_unqualified_call=_is_unqualified_call,
 )
 
 
 def run(file_path, content):
     source = content.encode()
-    findings = run_taint_check(_PARSER, source, file_path, CONFIG)
-    return [f for f in findings if not SAFE_PLACEHOLDER.search(f["snippet"])]
+    return run_taint_check(_PARSER, source, file_path, CONFIG)

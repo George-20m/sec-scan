@@ -5,7 +5,8 @@ vulnerability check at a time. It walks a codebase and flags patterns
 that look like known vulnerability classes. No external scanning
 services, no network calls, no data leaves your machine.
 
-See [CHANGELOG.md](CHANGELOG.md) for what changed between versions.
+See the [full changelog](https://github.com/George-20m/sec-scan/blob/prod/CHANGELOG.md)
+for detailed changes, or view the [PyPI release history](https://pypi.org/project/sec-scan/#history).
 
 ## What it checks for right now
 

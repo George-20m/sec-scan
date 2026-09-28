@@ -18,13 +18,6 @@ DANGER_PATTERNS = [
     re.compile(r'\$"'),
 ]
 
-SAFE_PATTERNS = [
-    re.compile(r'\?'),
-    re.compile(r'%s'),
-    re.compile(r'@\w+'),
-    re.compile(r':\w+'),
-]
-
 
 def run(file_path, content):
     findings = []
@@ -33,10 +26,7 @@ def run(file_path, content):
         if not SINK_PATTERN.search(line):
             continue
 
-        has_danger = any(p.search(line) for p in DANGER_PATTERNS)
-        has_safe = any(p.search(line) for p in SAFE_PATTERNS)
-
-        if has_danger and not has_safe:
+        if any(p.search(line) for p in DANGER_PATTERNS):
             findings.append({
                 "check_id": "SQL-INJECTION",
                 "severity": "HIGH",
