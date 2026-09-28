@@ -18,21 +18,22 @@ for detailed changes, or view the [PyPI release history](https://pypi.org/projec
   Applies to: `.py .js .ts .php .java .cs .rb .go`
 
 - **SQL Injection (deep)**: parses source code into a real syntax
-  tree instead of reading text line by line, tracks which variables
-  were built from unsafe string concatenation, interpolation, or
-  (for Java and Go) unsafe use of `String.format`/`fmt.Sprintf`, and
-  follows that variable across lines within the same function until
-  it either reaches a SQL sink or gets safely reassigned. It also
-  follows a tainted value one level deep into another function
-  defined in the same file, if that function itself executes it.
-  Applies to: `.py .js .ts .php .java .cs .rb .go` (all 8 languages).
+  tree instead of reading text line by line. It follows configured
+  web-request input through concatenation, interpolation, or format
+  calls into SQL execution. It handles direct source-to-sink flow,
+  local aliases and instance fields, conservative branches, local
+  helper calls, and query-building helper return values. Applies to:
+  `.py .js .ts .php .java .cs .rb .go` (all 8 languages).
+
+  Supported input sources include Flask/Django-style `request.*`,
+  Express `req.query`/`req.params`/`req.body`, Java servlet
+  `request.getParameter`, Go form-value calls, ASP.NET `Request.Query`
+  and `Request.Form`, PHP request superglobals, and Rails `params`.
 
   Known limitations, documented per-check in each check's own
   source file: taint tracking does not follow a value across files,
-  through recursive/cyclic calls, or through a helper function that
-  builds and *returns* a query for the caller to execute (only
-  "passed in and executed directly" is tracked, not "returned and
-  executed later").
+  through recursive/cyclic calls, callbacks, dynamic properties, or
+  complex framework-specific ORM/database APIs.
 
 When both the line-based and deep check would flag the same file and
 line, only the deep finding is shown, since it's the same underlying
@@ -94,11 +95,12 @@ intentionally lightweight detection, built in stages:
 - The line-based check reads each line as text and looks for a
   dangerous pattern sitting next to a SQL call. Fast, works on any
   of the eight supported languages, but only sees one line at a
-  time, so a query built across multiple lines can slip past it.
+  time, so a query built across multiple lines can slip past it. It
+  is intentionally a broad heuristic and can report more false
+  positives than the deep check.
 - The deep check instead parses the file into a proper syntax tree
-  and follows a variable's origin within a function (and one level
-  into another function in the same file, if it's passed there and
-  executed). All 8 languages share one taint-tracking engine
+  and follows configured external input through a function and local
+  helpers. All 8 languages share one taint-tracking engine
   (`taint_common.py`), so the core algorithm is written once, and
   each language only supplies its own grammar-specific details.
 

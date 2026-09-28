@@ -67,6 +67,10 @@ CONFIG = LanguageConfig(
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
     is_unqualified_call=_is_unqualified_call,
+    source_patterns=(r"\b(?:req|request)\.(?:query|params|body|cookies)\b",),
+    property_patterns=(r"this\.\w+",),
+    return_types={"return_statement"},
+    branch_types={"if_statement", "for_statement", "while_statement", "try_statement"},
 )
 
 

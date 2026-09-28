@@ -3,6 +3,24 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0]
+### Added
+- Source-aware deep SQL injection analysis. The deep checks now follow
+  common request-input patterns instead of treating constant-only SQL
+  concatenation as an injection risk: Flask/Django-style `request.*`,
+  Express-style `req.*`, Java servlet `request.getParameter`, Go form
+  values, ASP.NET `Request.*`, PHP superglobals, and Rails `params`.
+- Same-file helper return tracking for query builders, including helpers
+  that assign the unsafe query to a local variable before returning it.
+- Simple instance-field tracking (`self.query`, `this.query`, `$this->query`,
+  and Ruby instance variables) and conservative branch merging.
+
+### Fixed
+- SQL sinks now inspect the query argument only, rather than mistakenly
+  treating separately-bound parameter values as executable SQL.
+- Added regression coverage for trusted constant concatenation, direct
+  source-to-sink flow, returned queries, instance fields, and branches.
+
 ## [0.4.0]
 ### Fixed
 - Dedup, remove unsound placeholder filter, port Python to parity.

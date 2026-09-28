@@ -23,22 +23,26 @@ CASES = {
         "module": py_check,
         "ext": ".py",
         "unsafe": '''
-def find_user(name):
+def find_user(request):
+    name = request.args["name"]
     query = "SELECT * FROM users WHERE name = '" + name + "'"
     cursor.execute(query)
 ''',
         "safe": '''
-def find_user(name):
+def find_user(request):
+    name = request.args["name"]
     query = "SELECT * FROM users WHERE name = %s"
     cursor.execute(query, (name,))
 ''',
         "mixed": '''
-def find_user(name):
+def find_user(request):
+    name = request.args["name"]
     query = "SELECT * FROM users WHERE role = %s AND name = '" + name + "'"
     cursor.execute(query)
 ''',
         "format": '''
-def find_user(name):
+def find_user(request):
+    name = request.args["name"]
     query = "SELECT * FROM users WHERE name = '{}'".format(name)
     cursor.execute(query)
 ''',
@@ -46,7 +50,8 @@ def find_user(name):
 def run_query(sql):
     cursor.execute(sql)
 
-def find_user(name):
+def find_user(request):
+    name = request.args["name"]
     sql = "SELECT * FROM users WHERE name = '" + name + "'"
     run_query(sql)
 ''',
@@ -59,24 +64,69 @@ def other_thing():
     x = "a" + "b"
     return x
 ''',
+        "trusted_concat": '''
+def find_user():
+    table = "users"
+    query = "SELECT * FROM " + table
+    cursor.execute(query)
+''',
+        "direct_source": '''
+def find_user(request):
+    cursor.execute(request.args["query"])
+''',
+        "return_helper": '''
+def make_query(name):
+    return "SELECT * FROM users WHERE name = '" + name + "'"
+
+def find_user(request):
+    query = make_query(request.args["name"])
+    cursor.execute(query)
+''',
+        "return_helper_variable": '''
+def make_query(name):
+    query = "SELECT * FROM users WHERE name = '" + name + "'"
+    return query
+
+def find_user(request):
+    query = make_query(request.args["name"])
+    cursor.execute(query)
+''',
+        "instance_property": '''
+def find_user(self, request):
+    name = request.args["name"]
+    self.query = "SELECT * FROM users WHERE name = '" + name + "'"
+    cursor.execute(self.query)
+''',
+        "branch_merge": '''
+def find_user(request, use_name):
+    name = request.args["name"]
+    if use_name:
+        query = "SELECT * FROM users WHERE name = '" + name + "'"
+    else:
+        query = "SELECT * FROM users"
+    cursor.execute(query)
+''',
     },
     "javascript": {
         "module": js_check,
         "ext": ".js",
         "unsafe": '''
-function findUser(name) {
+function findUser(req) {
+    const name = req.query.name;
     const query = "SELECT * FROM users WHERE name = '" + name + "'";
     db.query(query);
 }
 ''',
         "safe": '''
-function findUser(name) {
+function findUser(req) {
+    const name = req.query.name;
     const query = "SELECT * FROM users WHERE name = ?";
     db.query(query, [name]);
 }
 ''',
         "mixed": '''
-function findUser(name) {
+function findUser(req) {
+    const name = req.query.name;
     const query = `SELECT * FROM users WHERE role = ? AND name = '${name}'`;
     db.query(query);
 }
@@ -85,7 +135,8 @@ function findUser(name) {
 function runQuery(sql) {
     db.query(sql);
 }
-function findUser(name) {
+function findUser(req) {
+    const name = req.query.name;
     const sql = "SELECT * FROM users WHERE name = '" + name + "'";
     runQuery(sql);
 }
@@ -107,7 +158,8 @@ function findUser(name) {
         "ext": ".java",
         "unsafe": '''
 class U {
-    void findUser(String name) {
+    void findUser(HttpServletRequest request) {
+        String name = request.getParameter("name");
         String sql = "SELECT * FROM users WHERE name = '" + name + "'";
         statement.executeQuery(sql);
     }
@@ -115,7 +167,8 @@ class U {
 ''',
         "safe": '''
 class U {
-    void findUser(String name) {
+    void findUser(HttpServletRequest request) {
+        String name = request.getParameter("name");
         String sql = "SELECT * FROM users WHERE name = ?";
         statement.executeQuery(sql);
     }
@@ -123,7 +176,8 @@ class U {
 ''',
         "mixed": '''
 class U {
-    void findUser(String name) {
+    void findUser(HttpServletRequest request) {
+        String name = request.getParameter("name");
         String sql = "SELECT * FROM users WHERE role = ? AND name = '" + name + "'";
         statement.executeQuery(sql);
     }
@@ -131,7 +185,8 @@ class U {
 ''',
         "format": '''
 class U {
-    void findUser(String name) {
+    void findUser(HttpServletRequest request) {
+        String name = request.getParameter("name");
         String sql = String.format("SELECT * FROM users WHERE name = '%s'", name);
         statement.executeQuery(sql);
     }
@@ -142,7 +197,8 @@ class U {
     void runQuery(String sql) {
         statement.executeQuery(sql);
     }
-    void findUser(String name) {
+    void findUser(HttpServletRequest request) {
+        String name = request.getParameter("name");
         String sql = "SELECT * FROM users WHERE name = '" + name + "'";
         runQuery(sql);
     }
@@ -154,28 +210,32 @@ class U {
         "ext": ".go",
         "unsafe": '''
 package main
-func findUser(name string) {
+func findUser(r *http.Request) {
+    name := r.FormValue("name")
     query := "SELECT * FROM users WHERE name = '" + name + "'"
     db.Query(query)
 }
 ''',
         "safe": '''
 package main
-func findUser(name string) {
+func findUser(r *http.Request) {
+    name := r.FormValue("name")
     query := "SELECT * FROM users WHERE name = ?"
     db.Query(query, name)
 }
 ''',
         "mixed": '''
 package main
-func findUser(name string) {
+func findUser(r *http.Request) {
+    name := r.FormValue("name")
     query := "SELECT * FROM users WHERE role = ? AND name = '" + name + "'"
     db.Query(query)
 }
 ''',
         "format": '''
 package main
-func findUser(name string) {
+func findUser(r *http.Request) {
+    name := r.FormValue("name")
     query := fmt.Sprintf("SELECT * FROM users WHERE name = '%s'", name)
     db.Query(query)
 }
@@ -185,7 +245,8 @@ package main
 func runQuery(sql string) {
     db.Query(sql)
 }
-func findUser(name string) {
+func findUser(r *http.Request) {
+    name := r.FormValue("name")
     sql := "SELECT * FROM users WHERE name = '" + name + "'"
     runQuery(sql)
 }
@@ -196,7 +257,8 @@ func findUser(name string) {
         "ext": ".cs",
         "unsafe": '''
 class U {
-    void FindUser(string name) {
+    void FindUser() {
+        string name = Request.Query["name"];
         string sql = "SELECT * FROM users WHERE name = '" + name + "'";
         var cmd = new SqlCommand(sql, conn);
     }
@@ -204,7 +266,8 @@ class U {
 ''',
         "safe": '''
 class U {
-    void FindUser(string name) {
+    void FindUser() {
+        string name = Request.Query["name"];
         string sql = "SELECT * FROM users WHERE name = @name";
         var cmd = new SqlCommand(sql, conn);
     }
@@ -212,7 +275,8 @@ class U {
 ''',
         "mixed": '''
 class U {
-    void FindUser(string name) {
+    void FindUser() {
+        string name = Request.Query["name"];
         string sql = $"SELECT * FROM users WHERE role = @role AND name = '{name}'";
         var cmd = new SqlCommand(sql, conn);
     }
@@ -223,7 +287,8 @@ class U {
     void RunQuery(string sql) {
         var cmd = new SqlCommand(sql, conn);
     }
-    void FindUser(string name) {
+    void FindUser() {
+        string name = Request.Query["name"];
         string sql = "SELECT * FROM users WHERE name = '" + name + "'";
         RunQuery(sql);
     }
@@ -234,19 +299,22 @@ class U {
         "module": php_check,
         "ext": ".php",
         "unsafe": '''<?php
-function findUser($name) {
+function findUser() {
+    $name = $_GET["name"];
     $sql = "SELECT * FROM users WHERE name = '" . $name . "'";
     $this->db->query($sql);
 }
 ''',
         "safe": '''<?php
-function findUser($name) {
+function findUser() {
+    $name = $_GET["name"];
     $sql = "SELECT * FROM users WHERE name = ?";
     $this->db->query($sql, [$name]);
 }
 ''',
         "mixed": '''<?php
-function findUser($name) {
+function findUser() {
+    $name = $_GET["name"];
     $sql = "SELECT * FROM users WHERE role = ? AND name = '" . $name . "'";
     $this->db->query($sql);
 }
@@ -265,19 +333,22 @@ function findUser($name) {
         "module": rb_check,
         "ext": ".rb",
         "unsafe": '''
-def find_user(name)
+def find_user
+  name = params[:name]
   sql = "SELECT * FROM users WHERE name = '" + name + "'"
   db.execute(sql)
 end
 ''',
         "safe": '''
-def find_user(name)
+def find_user
+  name = params[:name]
   sql = "SELECT * FROM users WHERE name = ?"
   db.execute(sql, name)
 end
 ''',
         "mixed": '''
-def find_user(name)
+def find_user
+  name = params[:name]
   sql = "SELECT * FROM users WHERE role = ? AND name = '" + name + "'"
   db.execute(sql)
 end
@@ -287,7 +358,8 @@ def run_query(sql)
   db.execute(sql)
 end
 
-def find_user(name)
+def find_user
+  name = params[:name]
   sql = "SELECT * FROM users WHERE name = '" + name + "'"
   run_query(sql)
 end
@@ -295,9 +367,11 @@ end
     },
 }
 
-EXPECT_FINDING = {"unsafe", "mixed", "format", "helper"}
+EXPECT_FINDING = {"unsafe", "mixed", "format", "helper", "direct_source",
+                  "return_helper", "return_helper_variable", "instance_property",
+                  "branch_merge"}
 EXPECT_NO_FINDING = {"safe", "no_false_match", "false_positive_check",
-                     "helper_should_NOT_propagate"}
+                     "helper_should_NOT_propagate", "trusted_concat"}
 
 
 def main():

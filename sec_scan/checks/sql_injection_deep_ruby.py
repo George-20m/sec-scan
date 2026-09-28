@@ -61,6 +61,10 @@ CONFIG = LanguageConfig(
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
     is_unqualified_call=_is_unqualified_call,
+    source_patterns=(r"\bparams\s*\[",),
+    property_patterns=(r"@\w+",),
+    return_types={"return"},
+    branch_types={"if", "unless", "while", "for"},
 )
 
 

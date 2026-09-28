@@ -76,6 +76,9 @@ CONFIG = LanguageConfig(
     get_function_name=_get_function_name,
     get_function_params=_get_function_params,
     is_unqualified_call=_is_unqualified_call,
+    source_patterns=(r"\.(?:FormValue|PostFormValue)\s*\(",),
+    return_types={"return_statement"},
+    branch_types={"if_statement", "for_statement"},
 )
 
 

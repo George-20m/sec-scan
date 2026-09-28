@@ -40,6 +40,7 @@ v3 additions:
 """
 
 from dataclasses import dataclass, field
+import re
 
 
 @dataclass
@@ -60,6 +61,10 @@ class LanguageConfig:
     get_function_name: callable = None
     get_function_params: callable = None
     is_unqualified_call: callable = None
+    source_patterns: tuple = ()
+    property_patterns: tuple = ()
+    return_types: set = field(default_factory=set)
+    branch_types: set = field(default_factory=set)
 
 
 def node_text(node, source):
@@ -112,7 +117,24 @@ def is_format_call(node, cfg):
     return len(args) >= cfg.format_min_args
 
 
-def expr_is_unsafe(node, cfg):
+def is_source(node, source, cfg):
+    text = node_text(node, source).decode(errors="ignore")
+    return any(re.search(pattern, text) for pattern in cfg.source_patterns)
+
+
+def track_key(node, source, cfg):
+    """Return a stable name for a local variable or a simple instance field."""
+    if node is None:
+        return None
+    text = node_text(node, source).decode(errors="ignore")
+    if node.type in cfg.identifier_types:
+        return text
+    if any(re.fullmatch(pattern, text) for pattern in cfg.property_patterns):
+        return text
+    return None
+
+
+def expr_is_construction(node, cfg):
     if node is None:
         return False
     if node.type in cfg.string_types:
@@ -122,6 +144,24 @@ def expr_is_unsafe(node, cfg):
     if node.type in cfg.call_types:
         return is_format_call(node, cfg)
     return False
+
+
+def expr_is_untrusted(node, untrusted, source, cfg):
+    """Whether an expression contains external input or a value derived from it."""
+    if node is None:
+        return False
+    key = track_key(node, source, cfg)
+    if key is not None and key in untrusted:
+        return True
+    if is_source(node, source, cfg):
+        return True
+    return any(expr_is_untrusted(child, untrusted, source, cfg)
+               for child in node.children)
+
+
+def expr_is_unsafe_sql(node, untrusted, source, cfg):
+    return (expr_is_construction(node, cfg)
+            and expr_is_untrusted(node, untrusted, source, cfg))
 
 
 def build_finding(file_path, call_node, source, arg_src, tracked):
@@ -145,21 +185,78 @@ def build_finding(file_path, call_node, source, arg_src, tracked):
     }
 
 
-def check_call(call_node, tainted, source, file_path, findings, cfg):
+def check_call(call_node, unsafe_sql, untrusted, source, file_path, findings, cfg):
     name = cfg.get_call_name(call_node)
     if not name or name.lower() not in cfg.sink_names:
         return
 
-    for arg in cfg.get_call_args(call_node):
+    # All currently supported SQL APIs take the query text as their first
+    # argument. Later arguments are parameter values, never executable SQL.
+    for arg in cfg.get_call_args(call_node)[:1]:
         arg_src = node_text(arg, source).decode(errors="ignore")
 
-        if arg.type in cfg.identifier_types and arg_src in tainted:
+        key = track_key(arg, source, cfg)
+        if key is not None and key in unsafe_sql:
             findings.append(build_finding(file_path, call_node, source, arg_src, True))
-        elif expr_is_unsafe(arg, cfg):
+        elif expr_is_unsafe_sql(arg, untrusted, source, cfg):
             findings.append(build_finding(file_path, call_node, source, arg_src, False))
+        elif expr_is_untrusted(arg, untrusted, source, cfg):
+            findings.append(build_finding(file_path, call_node, source, arg_src, True))
 
 
-def collect_local_functions(root_node, cfg):
+def _return_parameter_indexes(func_node, source, cfg):
+    """Return parameter positions that can build SQL returned by this function."""
+    if not cfg.return_types or not cfg.get_function_params:
+        return set()
+    params = cfg.get_function_params(func_node)
+    indexes = set()
+    origins = {param: {param} for param in params}
+    unsafe_origins = {}
+
+    def expression_origins(node):
+        key = track_key(node, source, cfg)
+        if key is not None and key in origins:
+            return origins[key]
+        result = set()
+        for child in node.children:
+            result.update(expression_origins(child))
+        return result
+
+    def walk(node, in_branch=False):
+        if node.type in cfg.scope_types and node is not func_node:
+            return
+        if node.type in cfg.assign_types:
+            left, right = get_assign_parts(node)
+            key = track_key(left, source, cfg)
+            if key is not None and right is not None:
+                value_origins = expression_origins(right)
+                if value_origins:
+                    origins[key] = value_origins
+                elif not in_branch:
+                    origins.pop(key, None)
+                if expr_is_construction(right, cfg) and value_origins:
+                    unsafe_origins[key] = value_origins
+                elif not in_branch:
+                    unsafe_origins.pop(key, None)
+        if node.type in cfg.return_types:
+            values = node.named_children
+            if values:
+                value = values[0]
+                key = track_key(value, source, cfg)
+                value_origins = unsafe_origins.get(key, set()) if key else set()
+                if expr_is_construction(value, cfg):
+                    value_origins = expression_origins(value)
+                for index, param in enumerate(params):
+                    if param in value_origins:
+                        indexes.add(index)
+        for child in node.children:
+            walk(child, in_branch or node.type in cfg.branch_types)
+
+    walk(func_node)
+    return indexes
+
+
+def collect_local_functions(root_node, source, cfg):
     """Maps function name -> (param_names, body_node) for every
     scope in the file, so calls to them can be followed one level
     deep. Returns {} if the language config doesn't support this
@@ -173,7 +270,8 @@ def collect_local_functions(root_node, cfg):
             name = cfg.get_function_name(node)
             if name:
                 params = cfg.get_function_params(node) if cfg.get_function_params else []
-                registry[name] = (params, node)
+                registry[name] = (params, node,
+                                  _return_parameter_indexes(node, source, cfg))
         for c in node.children:
             walk(c)
 
@@ -182,31 +280,49 @@ def collect_local_functions(root_node, cfg):
 
 
 def scan_scope(func_node, source, file_path, findings, cfg,
-               local_functions=None, seed_tainted=None, visiting=None):
-    tainted = set(seed_tainted) if seed_tainted else set()
+               local_functions=None, seed_untrusted=None,
+               seed_unsafe_sql=None, visiting=None):
+    untrusted = set(seed_untrusted) if seed_untrusted else set()
+    unsafe_sql = set(seed_unsafe_sql) if seed_unsafe_sql else set()
     if visiting is None:
         visiting = set()
 
-    def walk(node):
+    def walk(node, in_branch=False):
         if node.type in cfg.scope_types and node is not func_node:
-            scan_scope(node, source, file_path, findings, cfg, local_functions, None, visiting)
+            scan_scope(node, source, file_path, findings, cfg, local_functions,
+                       None, None, visiting)
             return
 
         if node.type in cfg.assign_types:
             left, right = get_assign_parts(node)
-            if left is not None and right is not None and left.type in cfg.identifier_types:
-                name = node_text(left, source).decode(errors="ignore")
-                if expr_is_unsafe(right, cfg):
-                    tainted.add(name)
-                elif (right.type in cfg.identifier_types
-                        and node_text(right, source).decode(errors="ignore") in tainted):
-                    # simple alias: a = b, where b is already tainted
-                    tainted.add(name)
-                else:
-                    tainted.discard(name)
+            name = track_key(left, source, cfg)
+            if name is not None and right is not None:
+                returns_unsafe = False
+                if right.type in cfg.call_types and local_functions:
+                    call_name = cfg.get_call_name(right)
+                    is_bare = (cfg.is_unqualified_call is None
+                               or cfg.is_unqualified_call(right))
+                    if call_name and is_bare and call_name in local_functions:
+                        _, _, return_indexes = local_functions[call_name]
+                        call_args = cfg.get_call_args(right)
+                        returns_unsafe = any(
+                            index < len(call_args)
+                            and expr_is_untrusted(call_args[index], untrusted, source, cfg)
+                            for index in return_indexes
+                        )
+
+                if returns_unsafe or expr_is_unsafe_sql(right, untrusted, source, cfg):
+                    unsafe_sql.add(name)
+                elif not in_branch:
+                    unsafe_sql.discard(name)
+
+                if expr_is_untrusted(right, untrusted, source, cfg):
+                    untrusted.add(name)
+                elif not in_branch:
+                    untrusted.discard(name)
 
         if node.type in cfg.call_types:
-            check_call(node, tainted, source, file_path, findings, cfg)
+            check_call(node, unsafe_sql, untrusted, source, file_path, findings, cfg)
 
             # Cross-function propagation: if this call passes a
             # tainted (or directly unsafe) value into a function
@@ -219,24 +335,29 @@ def scan_scope(func_node, source, file_path, findings, cfg,
                 name = cfg.get_call_name(node)
                 is_bare = cfg.is_unqualified_call is None or cfg.is_unqualified_call(node)
                 if name and is_bare and name in local_functions and name not in visiting:
-                    params, body = local_functions[name]
+                    params, body, _ = local_functions[name]
                     call_args = cfg.get_call_args(node)
-                    seed = set()
+                    seed_untrusted_params = set()
+                    seed_unsafe_params = set()
                     for i, arg in enumerate(call_args):
                         if i >= len(params):
                             break
                         arg_src = node_text(arg, source).decode(errors="ignore")
-                        is_tainted_arg = (arg.type in cfg.identifier_types and arg_src in tainted)
-                        if is_tainted_arg or expr_is_unsafe(arg, cfg):
-                            seed.add(params[i])
-                    if seed:
+                        key = track_key(arg, source, cfg)
+                        if key is not None and key in unsafe_sql:
+                            seed_unsafe_params.add(params[i])
+                        if (expr_is_untrusted(arg, untrusted, source, cfg)
+                                or expr_is_unsafe_sql(arg, untrusted, source, cfg)):
+                            seed_untrusted_params.add(params[i])
+                    if seed_untrusted_params or seed_unsafe_params:
                         visiting.add(name)
                         scan_scope(body, source, file_path, findings, cfg,
-                                   local_functions, seed, visiting)
+                                   local_functions, seed_untrusted_params,
+                                   seed_unsafe_params, visiting)
                         visiting.discard(name)
 
         for child in node.children:
-            walk(child)
+            walk(child, in_branch or node.type in cfg.branch_types)
 
     walk(func_node)
 
@@ -244,6 +365,6 @@ def scan_scope(func_node, source, file_path, findings, cfg,
 def run_taint_check(parser, source, file_path, cfg):
     tree = parser.parse(source)
     findings = []
-    local_functions = collect_local_functions(tree.root_node, cfg)
+    local_functions = collect_local_functions(tree.root_node, source, cfg)
     scan_scope(tree.root_node, source, file_path, findings, cfg, local_functions)
     return findings
