@@ -16,6 +16,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install build
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m pip install .
+      - run: python tools/verify_node_types.py
+      - run: python tools/run_functional_checks.py
       - run: python -m build
+      - run: python -m twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
